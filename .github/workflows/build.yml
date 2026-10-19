@@ -1,28 +1,45 @@
 name: Build APK
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Unzip project
-        run: unzip -q NavaLauncher.zip
+      - name: Find project folder
+        run: |
+          if [ -f ahbar.zip ]; then unzip -oq ahbar.zip; fi
+          if [ -f pubspec.yaml ]; then D=.; else D=$(dirname "$(find . -maxdepth 2 -name pubspec.yaml | head -n1)"); fi
+          echo "APP_DIR=$D" >> $GITHUB_ENV
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
-      - uses: gradle/actions/setup-gradle@v3
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
         with:
-          gradle-version: 8.5
-      - name: Set update URL
-        run: sed -i "s#OWNER_REPO#${{ github.repository }}#" NavaLauncher/app/src/main/java/com/mrahmadiaan/nava/ui/SettingsScreen.kt
-      - name: Build debug APK
-        working-directory: NavaLauncher
-        run: gradle assembleDebug --no-daemon --stacktrace
+          channel: stable
+          cache: true
+      - name: Prepare project
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          flutter create --platforms=android --org com.mrahmadiaan --project-name ahbar /tmp/gen
+          rm -rf android test && cp -r /tmp/gen/android ./android
+          python3 tools/patch_android.py
+          bash tools/setup_font.sh
+          flutter pub get
+      - name: Build release APK
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
-          name: NavaLauncher-APK
-          path: NavaLauncher/app/build/outputs/apk/debug/app-debug.apk
+          name: ahbar-apk
+          path: ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Ahbar build ${{ github.run_number }}
+          files: ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-release.apk
